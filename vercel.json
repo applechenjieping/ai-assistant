@@ -1,12 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
   "builds": [
-    {
-      "src": "client/dist/**",
-      "use": "@vercel/static"
-    },
     {
       "src": "server/index.js",
       "use": "@vercel/node"
@@ -18,23 +12,8 @@
       "dest": "/server/index.js"
     },
     {
-      "src": "/admin",
-      "dest": "/client/dist/index.html"
-    },
-    {
-      "src": "/chat",
-      "dest": "/client/dist/index.html"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/client/dist/$1"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/client/dist/index.html"
+      "dest": "/server/index.js"
     }
   ]
 }
