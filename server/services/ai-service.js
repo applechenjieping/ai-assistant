@@ -1,29 +1,16 @@
 require('dotenv').config();
 const https = require('https');
 
-// 支持多个API Key
-const API_KEYS = [
-  process.env.SILICONFLOW_API_KEY,
-  process.env.SILICONFLOW_API_KEY_2,
-  process.env.SILICONFLOW_API_KEY_3
-].filter(key => key); // 过滤掉空的
-
-let currentKeyIndex = 0;
-
-function getNextKey() {
-  const key = API_KEYS[currentKeyIndex % API_KEYS.length];
-  currentKeyIndex++;
-  return key;
-}
+// 使用单个API Key
+const API_KEY = process.env.SILICONFLOW_API_KEY;
 
 const SILICONFLOW_MODEL = process.env.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-72B-Instruct';
 
 /**
  * 调用硅基流动 API
  */
-function callAPI(requestBody, retries = 3, timeout = 30000) {
+function callAPI(requestBody, timeout = 60000) {
   return new Promise((resolve, reject) => {
-    const apiKey = getNextKey();
     const postData = JSON.stringify(requestBody);
     
     const options = {
@@ -33,7 +20,7 @@ function callAPI(requestBody, retries = 3, timeout = 30000) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${API_KEY}`,
         'Content-Length': Buffer.byteLength(postData)
       },
       timeout: timeout
@@ -79,7 +66,7 @@ function callAPI(requestBody, retries = 3, timeout = 30000) {
  * 发送消息到AI
  */
 async function sendToAI(messages, systemPrompt) {
-  const maxRetries = API_KEYS.length * 2; // 每个key重试2次
+  const maxRetries = 3;
   let lastError;
 
   for (let i = 0; i < maxRetries; i++) {
@@ -92,7 +79,7 @@ async function sendToAI(messages, systemPrompt) {
         ],
         temperature: 0.7,
         max_tokens: 2048
-      }, 1, 45000); // 单次重试，超时45秒
+      }, 60000);
 
       if (response.choices && response.choices[0]) {
         return response.choices[0].message.content;
@@ -102,9 +89,8 @@ async function sendToAI(messages, systemPrompt) {
       console.log(`API 调用失败 (${i + 1}/${maxRetries}):`, error.message);
       lastError = error;
       
-      // 如果是超时或连接错误，稍等后重试
       if (error.message.includes('timeout') || error.message.includes('ECONNRESET')) {
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
   }
