@@ -9,7 +9,7 @@ const SILICONFLOW_MODEL = process.env.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-72B-Ins
 /**
  * 调用硅基流动 API
  */
-function callAPI(requestBody, timeout = 60000) {
+function callAPI(requestBody, timeout = 120000) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(requestBody);
     
