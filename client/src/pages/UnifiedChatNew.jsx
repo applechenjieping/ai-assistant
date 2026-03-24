@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 
-const VERCEL_AI_URL = 'https://ai-assistant-one-gamma.vercel.app/api/chat';
+const API_URL = "https://ai-assistant-wz69.onrender.com/api";
 const API_URL = 'https://ai-assistant-wz69.onrender.com/api';
 
 export default function UnifiedChat() {
@@ -69,7 +69,7 @@ ${faqContext}
 回答要简洁、友好、专业。`;
 
       // 直接调用Vercel AI
-      const res = await fetch(VERCEL_AI_URL, {
+      const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
