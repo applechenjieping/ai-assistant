@@ -99,3 +99,28 @@ async function sendToAI(messages, systemPrompt) {
 }
 
 module.exports = { sendToAI };
+
+/**
+ * 统一AI对话（供unified-chat路由使用）
+ */
+async function chatWithUnifiedAI(userMessage, history, faqs, activityNames) {
+  const faqContext = faqs.map(f => `活动：${f.activity_name}\nQ: ${f.question}\nA: ${f.answer}`).join('\n\n');
+  const activitiesStr = activityNames.join('、');
+
+  const systemPrompt = `你是美林湖社区的AI活动助手，负责解答关于以下活动的问题：${activitiesStr}。
+
+以下是活动的FAQ知识库：
+${faqContext}
+
+请根据FAQ知识库回答用户问题。如果问题不在知识库中，请礼貌地说明并建议拨打热线020-36728888咨询。
+回答要简洁、友好、专业。`;
+
+  const messages = [
+    ...history.map(h => ({ role: h.role, content: h.content })),
+    { role: 'user', content: userMessage }
+  ];
+
+  return await sendToAI(messages, systemPrompt);
+}
+
+module.exports = { sendToAI, chatWithUnifiedAI };
