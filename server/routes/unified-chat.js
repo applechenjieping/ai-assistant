@@ -118,7 +118,7 @@ router.post('/unified-message', async (req, res) => {
     db.run(`
       INSERT INTO chat_messages (id, session_id, role, content, is_unanswered, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `, [aiMsgId, session_id, 'assistant', aiReply.content, aiReply.isUnanswered ? 1 : 0, new Date().toISOString()]);
+    `, [aiMsgId, session_id, 'assistant', aiReply, false, new Date().toISOString()]);
     
     // 如果是未解答问题，记录下来
     if (aiReply.isUnanswered) {
@@ -132,7 +132,7 @@ router.post('/unified-message', async (req, res) => {
     
     res.json({ 
       success: true,
-      reply: aiReply.content,
+      reply: aiReply,
       detected_activity: aiReply.detectedActivity,
       is_unanswered: aiReply.isUnanswered
     });

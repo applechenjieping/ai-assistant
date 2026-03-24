@@ -1,16 +1,41 @@
 require('dotenv').config();
 const https = require('https');
 
-const API_KEY = process.env.SILICONFLOW_API_KEY;
-const MODEL = process.env.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-7B-Instruct';
-const VERCEL_AI_URL = process.env.VERCEL_AI_URL;
+// 支持多个API Key
+const API_KEYS = [
+  process.env.SILICONFLOW_API_KEY,
+  process.env.SILICONFLOW_API_KEY_2
+].filter(key => key); // 过滤空值
 
-/**
- * 调用硅基流动 API（直接）
- */
-function callSiliconFlow(requestBody, timeout = 120000) {
+let currentKeyIndex = 0;
+
+function getNextKey() {
+  if (API_KEYS.length === 0) {
+    throw new Error('未配置API Key');
+  }
+  const key = API_KEYS[currentKeyIndex % API_KEYS.length];
+  currentKeyIndex++;
+  return key;
+}
+
+const MODEL = process.env.SILICONFLOW_MODEL || 'Qwen/Qwen2.5-7B-Instruct';
+
+async function callSiliconFlow(messages, systemPrompt, retryCount = 0) {
+  const maxRetries = API_KEYS.length * 2; // 每个Key最多重试2次
+  
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify(requestBody);
+    const apiKey = getNextKey();
+    
+    const fullMessages = systemPrompt 
+      ? [{ role: 'system', content: systemPrompt }, ...messages]
+      : messages;
+    
+    const postData = JSON.stringify({
+      model: MODEL,
+      messages: fullMessages,
+      temperature: 0.7,
+      max_tokens: 2048
+    });
     
     const options = {
       hostname: 'api.siliconflow.cn',
@@ -19,10 +44,10 @@ function callSiliconFlow(requestBody, timeout = 120000) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Length': Buffer.byteLength(postData)
       },
-      timeout: timeout
+      timeout: 60000
     };
 
     const req = https.request(options, (res) => {
@@ -30,137 +55,75 @@ function callSiliconFlow(requestBody, timeout = 120000) {
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
         try {
+          const json = JSON.parse(data);
           if (res.statusCode !== 200) {
+            // 如果是这个Key的配额问题，尝试下一个Key
+            if (retryCount < maxRetries && (data.includes('quota') || data.includes('insufficient'))) {
+              console.log(`Key配额不足，切换下一个Key (${retryCount + 1}/${maxRetries})`);
+              callSiliconFlow(messages, systemPrompt, retryCount + 1).then(resolve).catch(reject);
+              return;
+            }
             reject(new Error(`API错误: ${res.statusCode}`));
             return;
           }
-          resolve(JSON.parse(data));
+          resolve(json.choices?.[0]?.message?.content || '无法生成回答');
         } catch (e) {
           reject(e);
         }
       });
     });
 
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('API超时'));
-    });
-    req.write(postData);
-    req.end();
-  });
-}
-
-/**
- * 调用Vercel AI代理
- */
-function callVercelAI(message, history, systemPrompt, timeout = 120000) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({ message, history, systemPrompt });
-    
-    const url = new URL(VERCEL_AI_URL);
-    
-    const options = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      },
-      timeout: timeout
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          if (res.statusCode !== 200) {
-            reject(new Error(`Vercel API错误: ${res.statusCode}`));
-            return;
-          }
-          const json = JSON.parse(data);
-          resolve(json.reply);
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Vercel API超时'));
-    });
-    req.write(postData);
-    req.end();
-  });
-}
-
-/**
- * 发送消息到AI
- */
-async function sendToAI(messages, systemPrompt) {
-  // 如果配置了Vercel AI URL，使用Vercel代理
-  if (VERCEL_AI_URL) {
-    const history = messages.map(m => ({ role: m.role, content: m.content }));
-    const lastMessage = history.pop();
-    return await callVercelAI(lastMessage.content, history, systemPrompt);
-  }
-  
-  // 否则直接调用硅基流动
-  const maxRetries = 3;
-  let lastError;
-
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const response = await callSiliconFlow({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...messages
-        ],
-        temperature: 0.7,
-        max_tokens: 2048
-      });
-
-      if (response.choices && response.choices[0]) {
-        return response.choices[0].message.content;
+    req.on('error', (e) => {
+      // 网络错误，尝试下一个Key
+      if (retryCount < maxRetries) {
+        console.log(`网络错误，切换Key重试 (${retryCount + 1}/${maxRetries})`);
+        callSiliconFlow(messages, systemPrompt, retryCount + 1).then(resolve).catch(reject);
+      } else {
+        reject(e);
       }
-      throw new Error('API返回格式异常');
-    } catch (error) {
-      console.log(`API调用失败 (${i + 1}/${maxRetries}):`, error.message);
-      lastError = error;
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-
-  throw lastError || new Error('AI服务暂时不可用');
+    });
+    
+    req.on('timeout', () => { 
+      req.destroy();
+      if (retryCount < maxRetries) {
+        console.log(`超时，切换Key重试 (${retryCount + 1}/${maxRetries})`);
+        callSiliconFlow(messages, systemPrompt, retryCount + 1).then(resolve).catch(reject);
+      } else {
+        reject(new Error('API请求超时')); 
+      }
+    });
+    
+    req.write(postData);
+    req.end();
+  });
 }
 
-/**
- * 统一AI对话
- */
-async function chatWithUnifiedAI(userMessage, history, faqs, activityNames) {
-  const faqContext = faqs.map(f => `活动：${f.activity_name}\nQ: ${f.question}\nA: ${f.answer}`).join('\n\n');
-  const activitiesStr = activityNames.join('、');
+async function sendToAI(messages, systemPrompt) {
+  return await callSiliconFlow(messages, systemPrompt);
+}
 
-  const systemPrompt = `你是美林湖社区的AI活动助手，负责解答关于以下活动的问题：${activitiesStr}。
+async function chatWithUnifiedAI(userMessage, history, faqs, activityNames) {
+  const namesStr = Array.isArray(activityNames) ? activityNames.join('、') : String(activityNames || '');
+  const faqList = Array.isArray(faqs) ? faqs : [];
+  
+  const faqContext = faqList.map(f => 
+    `【${f.activity_name || '通用'}】\nQ: ${f.question}\nA: ${f.answer}`
+  ).join('\n\n');
+
+  const systemPrompt = `你是美林湖社区的AI活动助手，负责解答关于以下活动的问题：${namesStr}。
 
 以下是活动的FAQ知识库：
 ${faqContext}
 
 请根据FAQ知识库回答用户问题。如果问题不在知识库中，请礼貌地说明并建议拨打热线020-36728888咨询。
-回答要简洁、友好、专业。`;
+回答要简洁、友好，专业。`;
 
   const messages = [
-    ...history.map(h => ({ role: h.role, content: h.content })),
+    ...(history || []).map(h => ({ role: h.role || 'user', content: h.content })),
     { role: 'user', content: userMessage }
   ];
 
-  return await sendToAI(messages, systemPrompt);
+  return await callSiliconFlow(messages, systemPrompt);
 }
 
 module.exports = { sendToAI, chatWithUnifiedAI };
